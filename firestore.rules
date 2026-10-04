@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function validAlert(d) {
+      return d.userId == request.auth.uid
+        && d.latitude is number && d.latitude >= -90 && d.latitude <= 90
+        && d.longitude is number && d.longitude >= -180 && d.longitude <= 180
+        && d.severity in ['LOW','MEDIUM','HIGH','CRITICAL']
+        && d.status in ['ACTIVE']
+        && d.verified == false
+        && d.message is string && d.message.size() <= 500;
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create, update: if signedIn() && request.auth.uid == uid && !('role' in request.resource.data);
+    }
+    match /alerts/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validAlert(request.resource.data);
+      allow update: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid
+        && resource.data.status == 'ACTIVE'
+        && request.resource.data.status in ['RESOLVED','CANCELLED']
+        && request.resource.data.verified == resource.data.verified);
+      allow delete: if isAdmin();
+    }
+    match /presence/{id} { allow read: if signedIn(); allow write: if signedIn() && request.auth.uid == id && request.resource.data.keys().hasOnly(['lastSeen']); }
+    match /safeZones/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /blockedRoads/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /userTokens/{id} { allow read, write: if signedIn() && request.auth.uid == id; }
+    match /notifications/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if isAdmin(); }
+  }
+}
